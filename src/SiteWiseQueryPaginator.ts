@@ -1,4 +1,4 @@
-import { DataQueryRequest, DataQueryResponse, DataQueryResponseData, LoadingState } from '@grafana/data';
+import { DataQueryRequest, DataQueryResponse, LoadingState } from '@grafana/data';
 import { appendMatchingFrames } from 'appendFrames';
 import { getNextQueries } from 'getNextQueries';
 import { Subject } from 'rxjs';
@@ -12,6 +12,8 @@ export interface SitewiseQueryPaginatorOptions {
   request: DataQueryRequest<SitewiseQuery>,
   // The function to call to execute the query.
   queryFn: (request: DataQueryRequest<SitewiseQuery>) => Promise<DataQueryResponse>;
+  // The cached response to set as the initial response.
+  cachedResponse?: DataQueryResponse;
 }
 
 /**
@@ -46,25 +48,25 @@ export class SitewiseQueryPaginator {
    * @param subject The subject to emit the query responses to.
    */
   private async paginateQuery(subject: Subject<DataQueryResponse>) {
-    const { request: initialRequest, queryFn } = this.options;
+    const { request: initialRequest, queryFn, cachedResponse } = this.options;
     const { requestId } = initialRequest;
+    let paginatingRequest = initialRequest;
 
     try {
-      let retrievedData: DataQueryResponseData[] | undefined;
+      let retrievedData = cachedResponse?.data;
       let nextQueries: SitewiseNextQuery[] | undefined;
       let count = 1;
 
       do {
-        let request = initialRequest;
         if (nextQueries != null) {
-          request = {
-            ...request,
+          paginatingRequest = {
+            ...paginatingRequest,
             requestId: `${requestId}.${++count}`,
             targets: nextQueries,
           };
         }
 
-        const response = await queryFn(request);
+        const response = await queryFn(paginatingRequest);
         if (retrievedData == null) {
           retrievedData = response.data;
         } else {
@@ -76,7 +78,7 @@ export class SitewiseQueryPaginator {
           break;
         }
 
-        nextQueries = getNextQueries(request, response);
+        nextQueries = getNextQueries(paginatingRequest, response);
         const loadingState = nextQueries ? LoadingState.Streaming : LoadingState.Done;
 
         subject.next({ ...response, data: retrievedData, state: loadingState, key: requestId });

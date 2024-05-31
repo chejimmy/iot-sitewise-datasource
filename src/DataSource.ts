@@ -5,20 +5,24 @@ import {
   DataQueryRequest,
   DataFrame,
   MetricFindValue,
+  LoadingState,
 } from '@grafana/data';
 import { DataSourceWithBackend, getTemplateSrv } from '@grafana/runtime';
 
 import { SitewiseCache } from 'sitewiseCache';
 import { SitewiseQuery, SitewiseOptions, isPropertyQueryType } from './types';
 import { Observable } from 'rxjs';
+import { tap } from 'rxjs/operators';
 import { frameToMetricFindValues } from 'utils';
 import { SitewiseVariableSupport } from 'variables';
 import { SitewiseQueryPaginator } from 'SiteWiseQueryPaginator';
+import { TimeSeriesCache } from 'TimeSeriesCache';
 
 export class DataSource extends DataSourceWithBackend<SitewiseQuery, SitewiseOptions> {
   // Easy access for QueryEditor
   readonly options: SitewiseOptions;
   private cache = new Map<string, SitewiseCache>();
+  private timeSeriesCache = new TimeSeriesCache();
 
   constructor(instanceSettings: DataSourceInstanceSettings<SitewiseOptions>) {
     super(instanceSettings);
@@ -141,12 +145,26 @@ export class DataSource extends DataSourceWithBackend<SitewiseQuery, SitewiseOpt
   }
 
   query(request: DataQueryRequest<SitewiseQuery>): Observable<DataQueryResponse> {
+    // FIXME: get cache for time series data only?
+    const cachedInfo = request.range != null ? this.timeSeriesCache.get(request) : undefined;
+
     return new SitewiseQueryPaginator({
-      request,
+      request: cachedInfo?.paginatingRequest || request,
       queryFn: (request: DataQueryRequest<SitewiseQuery>) => {
         return super.query(request).toPromise();
       },
-    }).toObservable();
+      cachedResponse: cachedInfo?.cachedResponse,
+    }).toObservable().pipe(
+      // Cache the last (done) response
+      // FIXME: set cache for time series data only
+      tap({
+        next: (response) => {
+          if (response.state === LoadingState.Done && request.range != null) {
+            this.timeSeriesCache.set(request, response);
+          }
+        },
+      },)
+    );
   }
 }
 
