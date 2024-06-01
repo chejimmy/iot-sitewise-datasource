@@ -36,7 +36,12 @@ export class SitewiseQueryPaginator {
    * @returns An observable that emits the paginated query responses.
    */
   toObservable() {
+    const { request: { requestId }, cachedResponse } = this.options;
     const subject = new Subject<DataQueryResponse>();
+
+    if (cachedResponse != null) {
+      subject.next({ ...cachedResponse, state: LoadingState.Streaming, key: requestId });
+    }
 
     this.paginateQuery(subject);
 

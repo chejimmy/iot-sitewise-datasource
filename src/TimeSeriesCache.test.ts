@@ -145,10 +145,9 @@ describe('TimeSeriesCache', () => {
   });
 
   describe('trimTimeSeriesDataFrames()', () => {
-    const range = {
-      from: dateTime('2024-05-28T20:59:49.659Z'),
-      to: dateTime('2024-05-28T21:29:49.659Z'),
-      raw: { from: 'now-1h', to: 'now' },
+    const absolutionRange = {
+      from: dateTime('2024-05-28T00:00:00Z').valueOf(),
+      to: dateTime('2024-05-28T00:15:00Z').valueOf(),
     };
 
     const dataFrame: DataFrame =
@@ -161,7 +160,10 @@ describe('TimeSeriesCache', () => {
           type: FieldType.time,
           config: {},
           values: [
-            1716931550000
+            1716854400000,  // 2024-05-28T00:00:00Z
+            1716854400001,  // +1ms
+            1716855300000,  // 2024-05-28T00:15:00Z
+            1716855300001,  // +1ms
           ],
         },
         {
@@ -171,19 +173,14 @@ describe('TimeSeriesCache', () => {
             unit: 'RPS'
           },
           values: [
-            0.45253960150485795
+            1,
+            2,
+            3,
+            4,
           ],
         },
-        {
-          name: 'quality',
-          type: FieldType.string,
-          config: {},
-          values: [
-            'GOOD'
-          ],
-        }
       ],
-      length: 1
+      length: 4
     };
 
     it('excludes data of PropertyValue query', () => {
@@ -194,10 +191,12 @@ describe('TimeSeriesCache', () => {
         },
         dataFrame,
       };
-      const dataFrames = TimeSeriesCache.trimTimeSeriesDataFrames([cachedQueryInfo], range);
+      const dataFrames = TimeSeriesCache.trimTimeSeriesDataFrames([cachedQueryInfo], absolutionRange);
 
       expect(dataFrames).toHaveLength(1);
       expect(dataFrames).toContainEqual({
+        name: 'Demo Turbine Asset 1',
+        refId: 'A',
         fields: [],
         length: 0,
       });
@@ -217,10 +216,219 @@ describe('TimeSeriesCache', () => {
         },
         dataFrame,
       };
-      const dataFrames = TimeSeriesCache.trimTimeSeriesDataFrames([cachedQueryInfo], range);
+      const dataFrames = TimeSeriesCache.trimTimeSeriesDataFrames([cachedQueryInfo], absolutionRange);
 
       expect(dataFrames).toHaveLength(1);
       expect(dataFrames).toContainEqual(dataFrame);
     });
+
+    it.each([
+      QueryType.PropertyAggregate,
+      QueryType.PropertyInterpolated,
+      QueryType.PropertyValueHistory,
+    ])('trims time series data of time-series type - %s', (queryType: QueryType) => {
+      const cachedQueryInfo = {
+        query: {
+          queryType,
+          refId: 'A'
+        },
+        dataFrame,
+      };
+      const expectedDataFrame: DataFrame = {
+        name: 'Demo Turbine Asset 1',
+        refId: 'A',
+        fields: [
+          {
+            name: 'time',
+            type: FieldType.time,
+            config: {},
+            values: [
+              1716854400001,  // +1ms
+              1716855300000,  // 2024-05-28T00:15:00Z
+            ],
+          },
+          {
+            name: 'RotationsPerSecond',
+            type: FieldType.number,
+            config: {
+              unit: 'RPS'
+            },
+            values: [
+              2,
+              3,
+            ],
+          },
+        ],
+        length: 2
+      };
+      const dataFrames = TimeSeriesCache.trimTimeSeriesDataFrames([cachedQueryInfo], absolutionRange);
+
+      expect(dataFrames).toHaveLength(1);
+      expect(dataFrames).toContainEqual(expectedDataFrame);
+    });
+
+    it('keeps all data when all time values within range', () => {
+      const cachedQueryInfo = {
+        query: {
+          queryType: QueryType.PropertyValueHistory,
+          refId: 'A'
+        },
+        dataFrame: {
+          name: 'Demo Turbine Asset 1',
+          refId: 'A',
+          fields: [
+            {
+              name: 'time',
+              type: FieldType.time,
+              config: {},
+              values: [
+                1716854400001,  // 2024-05-28T00:00:00Z+1ms
+                1716855300000,  // 2024-05-28T00:15:00Z
+              ],
+            },
+            {
+              name: 'RotationsPerSecond',
+              type: FieldType.number,
+              config: {
+                unit: 'RPS'
+              },
+              values: [
+                1,
+                2,
+              ],
+            },
+          ],
+          length: 2
+        },
+      };
+      const dataFrames = TimeSeriesCache.trimTimeSeriesDataFrames([cachedQueryInfo], absolutionRange);
+
+      expect(dataFrames).toHaveLength(1);
+      expect(dataFrames).toContainEqual(cachedQueryInfo.dataFrame);
+    });
+
+    it('includes no time series data when all time values are before start time', () => {
+      const cachedQueryInfo = {
+        query: {
+          queryType: QueryType.PropertyValueHistory,
+          refId: 'A'
+        },
+        dataFrame: {
+          name: 'Demo Turbine Asset 1',
+          refId: 'A',
+          fields: [
+            {
+              name: 'time',
+              type: FieldType.time,
+              config: {},
+              values: [
+                1716854399999,
+                1716854400000,  // 2024-05-28T00:00:00Z
+              ],
+            },
+            {
+              name: 'RotationsPerSecond',
+              type: FieldType.number,
+              config: {
+                unit: 'RPS'
+              },
+              values: [
+                1,
+                2,
+              ],
+            },
+          ],
+          length: 2
+        },
+      };
+      const expectedDataFrame: DataFrame = {
+        name: 'Demo Turbine Asset 1',
+        refId: 'A',
+        fields: [
+          {
+            name: 'time',
+            type: FieldType.time,
+            config: {},
+            values: [],
+          },
+          {
+            name: 'RotationsPerSecond',
+            type: FieldType.number,
+            config: {
+              unit: 'RPS'
+            },
+            values: [],
+          },
+        ],
+        length: 0
+      };
+      const dataFrames = TimeSeriesCache.trimTimeSeriesDataFrames([cachedQueryInfo], absolutionRange);
+
+      expect(dataFrames).toHaveLength(1);
+      expect(dataFrames).toContainEqual(expectedDataFrame);
+    });
+
+    it('includes no time series data when all time values are after end time', () => {
+      const cachedQueryInfo = {
+        query: {
+          queryType: QueryType.PropertyValueHistory,
+          refId: 'A'
+        },
+        dataFrame: {
+          name: 'Demo Turbine Asset 1',
+          refId: 'A',
+          fields: [
+            {
+              name: 'time',
+              type: FieldType.time,
+              config: {},
+              values: [
+                1716855300001,  // 2024-05-28T00:15:00Z +1ms
+                1716855300002,
+              ],
+            },
+            {
+              name: 'RotationsPerSecond',
+              type: FieldType.number,
+              config: {
+                unit: 'RPS'
+              },
+              values: [
+                1,
+                2,
+              ],
+            },
+          ],
+          length: 2
+        },
+      };
+      const expectedDataFrame: DataFrame = {
+        name: 'Demo Turbine Asset 1',
+        refId: 'A',
+        fields: [
+          {
+            name: 'time',
+            type: FieldType.time,
+            config: {},
+            values: [],
+          },
+          {
+            name: 'RotationsPerSecond',
+            type: FieldType.number,
+            config: {
+              unit: 'RPS'
+            },
+            values: [],
+          },
+        ],
+        length: 0
+      };
+      const dataFrames = TimeSeriesCache.trimTimeSeriesDataFrames([cachedQueryInfo], absolutionRange);
+
+      expect(dataFrames).toHaveLength(1);
+      expect(dataFrames).toContainEqual(expectedDataFrame);
+    });
   });
+
+  // TODO: add test to ensure when a new QueryType is added, the developer would update the trim/request logic
 });

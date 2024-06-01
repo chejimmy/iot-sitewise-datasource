@@ -1,12 +1,13 @@
-import { DataFrame, DataQueryRequest, DataQueryResponse, LoadingState, TimeRange, dateTime } from '@grafana/data';
+import { AbsoluteTimeRange, ArrayVector, DataFrame, DataQueryRequest, DataQueryResponse, LoadingState, TimeRange, dateTime } from '@grafana/data';
 import { QueryType, SitewiseQuery } from 'types';
 
 // The time range (in minutes) to always request for regardless of cache.
-const ALWAYS_REFRESH_LAST_X_MINUTES = 15;
+const DEFAULT_TIME_SERIES_REFRESH_MINUTES = 15;
 const TIME_SERIES_QUERY_TYPES = new Set<QueryType>([
-  QueryType.PropertyValueHistory,
-  QueryType.PropertyInterpolated,
   QueryType.PropertyAggregate,
+  QueryType.PropertyInterpolated,
+  QueryType.PropertyValue,
+  QueryType.PropertyValueHistory,
 ]);
 
 type QueryCacheId = string;
@@ -116,34 +117,44 @@ export class TimeSeriesCache {
 
   get(request: DataQueryRequest<SitewiseQuery>): TimeSeriesCacheInfo | undefined {
     const { range: requestRange, requestId, targets: queries } = request;
-    const { raw: { from}  } = requestRange;
+    const { raw: { from: rawFrom }  } = requestRange;
 
     // TODO: restrict to relative time from now only
+    // TODO: restrict to greater than 15 minutes
     // Set cache for time series data only
-    if (typeof from !== 'string') {
+    if (typeof rawFrom !== 'string') {
+      return undefined;
+    }
+
+    const defaultRefreshAgo = dateTime(requestRange.to).subtract(DEFAULT_TIME_SERIES_REFRESH_MINUTES, 'minutes');
+    if (!requestRange.from.isBefore(defaultRefreshAgo)) {
       return undefined;
     }
 
     const queryCacheId = parseSiteWiseQueriesCacheId(queries);
-    const cachedDataInfo = this.responseDataMap.get(queryCacheId)?.get(from);
+    const cachedDataInfo = this.responseDataMap.get(queryCacheId)?.get(rawFrom);
     
     if (cachedDataInfo == null || !TimeSeriesCache.isCacheRequestOverlapping(cachedDataInfo.range, requestRange)) {
       return undefined;
     }
 
-    // TODO: match the range - if cache range overlap with request and cache from before/same as request range
-    // see matchRequest
-    // const queryIdTypeMap = new Map<string, QueryType>(queries.map(q => [q.refId, q.queryType]));
-    const cachedDataFrames = TimeSeriesCache.trimTimeSeriesDataFrames(cachedDataInfo.queries, requestRange);
+    const paginatingRequestRange = TimeSeriesCache.getPaginatingRequestRange(requestRange, cachedDataInfo.range);
+    
+    const cachedDataFrames = TimeSeriesCache.trimTimeSeriesDataFrames(cachedDataInfo.queries, {
+      from: requestRange.from.valueOf(),
+      to: paginatingRequestRange.from.valueOf(),
+    });
 
-    // TODO: need to trim the data; be careful about Expand Time Range
+    const paginatingRequest = this.getPaginatingRequest(request, paginatingRequestRange);
+
     return {
       cachedResponse: {
         data: cachedDataFrames,
         key: requestId,
+        // FIXME: set state according to paginatingRequest
         state: LoadingState.Streaming,
       },
-      paginatingRequest: this.getPaginatingRequest(request),
+      paginatingRequest,
     };
   }
 
@@ -183,19 +194,20 @@ export class TimeSeriesCache {
     return false;
   }
 
-  static trimTimeSeriesDataFrames(cachedQueryInfos: CachedQueryInfo[], requestRange: TimeRange): DataFrame[] {
+  static trimTimeSeriesDataFrames(cachedQueryInfos: CachedQueryInfo[], cacheRange: AbsoluteTimeRange): DataFrame[] {
     return cachedQueryInfos
       .map((cachedQueryInfo) => {
         const { query: { queryType }, dataFrame } = cachedQueryInfo;
         if (queryType === QueryType.PropertyValue) {
           return {
+            ...dataFrame,
             fields: [],
             length: 0,
           };
         }
 
         if (TIME_SERIES_QUERY_TYPES.has(queryType)) {
-          return TimeSeriesCache.trimTimeSeriesDataFrame(dataFrame, requestRange);
+          return TimeSeriesCache.trimTimeSeriesDataFrame(cachedQueryInfo, cacheRange);
         }
 
         // No trimming needed
@@ -203,28 +215,66 @@ export class TimeSeriesCache {
       });
   }
 
-  private static trimTimeSeriesDataFrame(dataFrame: DataFrame, requestRange: TimeRange): DataFrame {
+  /**
+   * 
+   * @param cachedQueryInfo 
+   * @param cacheRange the range of cache to include; `cacheRange.from` is exclusive and `cacheRange.to` is inclusive
+   * @returns 
+   */
+  private static trimTimeSeriesDataFrame(cachedQueryInfo: CachedQueryInfo, { from, to }: AbsoluteTimeRange): DataFrame {
+    // 1. find the start index of the cache range
+    const { dataFrame: { fields } } = cachedQueryInfo;
+    const timeField = fields.find(field => field.name === 'time')!;
+
+    const timeValues = timeField.values.toArray();
+    let fromIndex = timeValues.findIndex(time => time > from);  // from is exclusive
+    if (fromIndex === -1) {
+      // no time value within range; include not data in the slice
+      fromIndex = timeValues.length;
+    }
+
+    let toIndex = timeValues.findIndex(time => time > to);  // to is inclusive
+    if (toIndex === -1) {
+      // all time values before `to`
+      toIndex = timeValues.length;
+    }
+
+    const trimmedFields = fields.map(field => ({
+      ...field,
+      values: new ArrayVector(field.values.toArray().slice(fromIndex, toIndex)),
+    }));
+    
+    // TODO: be careful about Expand Time Range
     return {
-      ...dataFrame,
+      ...cachedQueryInfo.dataFrame,
+      fields: trimmedFields,
+      length: trimmedFields[0].values.length,
     };
   }
 
   // FIXME: account for cache end time
-  private getPaginatingRequest(request: DataQueryRequest<SitewiseQuery>) {
+  private getPaginatingRequest(request: DataQueryRequest<SitewiseQuery>, range: TimeRange) {
     // FIXME: always request for property value (latest value)
-
-    const { range } = request;
-    const last15Min = dateTime(range.to).subtract(ALWAYS_REFRESH_LAST_X_MINUTES, 'minutes');
-    // range from the last 15 min if the last 15 min is between the time range [from, to]
-    const rangeFrom = last15Min.isBefore(range.from) ? range.from : last15Min;
+    const {
+      targets,
+    } = request;
     
     return {
       ...request,
-      range: {
-        ...range,
-        // FIXME: might not always 15
-        from: rangeFrom,
-      },
+      range,
+      targets: targets.filter(({ queryType }) => TIME_SERIES_QUERY_TYPES.has(queryType)),
+    };
+  }
+
+  private static getPaginatingRequestRange(requestRange: TimeRange, cacheRange: TimeRange) {
+    const { to: cacheTo } = cacheRange;
+    const defaultRefreshAgo = dateTime(requestRange.to).subtract(DEFAULT_TIME_SERIES_REFRESH_MINUTES, 'minutes');
+    const from = defaultRefreshAgo.isBefore(cacheTo) ? defaultRefreshAgo : cacheTo;
+
+    return {
+      from,
+      to: requestRange.to,
+      raw: requestRange.raw,
     };
   }
 }
