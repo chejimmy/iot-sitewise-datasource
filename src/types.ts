@@ -68,6 +68,7 @@ export interface SitewiseQuery extends DataQuery {
   lastObservation?: boolean;
   flattenL4e?: boolean;
   maxPageAggregations?: number;
+  timeOrdering?: SiteWiseTimeOrder;
 }
 
 export interface SitewiseNextQuery extends SitewiseQuery {

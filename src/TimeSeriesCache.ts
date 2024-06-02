@@ -1,5 +1,5 @@
 import { AbsoluteTimeRange, ArrayVector, DataFrame, DataQueryRequest, DataQueryResponse, LoadingState, TimeRange, dateTime } from '@grafana/data';
-import { QueryType, SitewiseQuery } from 'types';
+import { QueryType, SiteWiseTimeOrder, SitewiseQuery } from 'types';
 
 // The time range (in minutes) to always request for regardless of cache.
 const DEFAULT_TIME_SERIES_REFRESH_MINUTES = 15;
@@ -29,6 +29,7 @@ function parseSiteWiseQueryCacheId(query: SitewiseQuery): QueryCacheId {
     flattenL4e,
     maxPageAggregations,
     datasource,
+    timeOrdering,
   } = query;
 
   /*
@@ -50,6 +51,7 @@ function parseSiteWiseQueryCacheId(query: SitewiseQuery): QueryCacheId {
     maxPageAggregations,
     datasource?.type,
     datasource?.uid,
+    timeOrdering,
   ]);
 }
 export function parseSiteWiseQueriesCacheId(queries: SitewiseQuery[]): QueryCacheId {
@@ -70,7 +72,10 @@ interface DataFrameCacheInfo {
 type RelativeTimeDataFramesMap = Map<CacheTime, DataFrameCacheInfo>;
 
 export interface TimeSeriesCacheInfo {
-  cachedResponse: DataQueryResponse;
+  cachedResponse: {
+    start?: DataQueryResponse;
+    end?: DataQueryResponse;
+  };
   paginatingRequest: DataQueryRequest<SitewiseQuery>;
 }
 
@@ -92,27 +97,38 @@ export class TimeSeriesCache {
       range,
     } = request;
     const { raw: { from } } = range;
+
+    // TODO: restrict to relative time from now
+    if (typeof from !== 'string') {
+      return;
+    }
+
+    let times = response.data[0].fields[0].values.toArray()
+    let prev = Number.MAX_SAFE_INTEGER;
+    for (let i = 0; i < times.length; i++) {
+      if (times > prev) {
+        debugger;
+      }
+    }
+
     const queryIdMap = new Map(queries.map(q => [q.refId, q]));
 
     const queryCacheId = parseSiteWiseQueriesCacheId(queries);
     const responseTimeMap = this.responseDataMap.get(queryCacheId) || new Map<CacheTime, DataFrameCacheInfo>();
     this.responseDataMap.set(queryCacheId, responseTimeMap);
 
-    // TODO: restrict to relative time from now
-    if (typeof from === 'string') {
-      responseTimeMap.set(from, {
-        queries: response.data.map((dataFrame: DataFrame) => {
-          // FIXME: remove usages of non-null
-          const query = queryIdMap.get(dataFrame.refId!)!;
-          return {
-            query,
-            dataFrame: dataFrame,
-          };
-        }),
-        // dataFrames: response.data,
-        range: range,
-      });
-    }
+    responseTimeMap.set(from, {
+      queries: response.data.map((dataFrame: DataFrame) => {
+        // FIXME: remove usages of non-null
+        const query = queryIdMap.get(dataFrame.refId!)!;
+        return {
+          query,
+          dataFrame: dataFrame,
+        };
+      }),
+      // dataFrames: response.data,
+      range: range,
+    });
   }
 
   get(request: DataQueryRequest<SitewiseQuery>): TimeSeriesCacheInfo | undefined {
@@ -140,19 +156,40 @@ export class TimeSeriesCache {
 
     const paginatingRequestRange = TimeSeriesCache.getPaginatingRequestRange(requestRange, cachedDataInfo.range);
     
+    const trimFrom = requestRange.from.valueOf();
+    const trimTo = paginatingRequestRange.from.valueOf();
+    console.log('trimFrom', new Date(trimFrom));
+    console.log('trimTo', new Date(trimTo));
+
     const cachedDataFrames = TimeSeriesCache.trimTimeSeriesDataFrames(cachedDataInfo.queries, {
       from: requestRange.from.valueOf(),
       to: paginatingRequestRange.from.valueOf(),
     });
+    const cachedDataFramesEnding = TimeSeriesCache.trimTimeSeriesDataFramesEnding(cachedDataInfo.queries, {
+      from: requestRange.from.valueOf(),
+      to: paginatingRequestRange.from.valueOf(),
+    });
+
+    const timeVals = cachedDataFramesEnding[0].fields[0].values;
+    console.log('first', cachedDataFramesEnding[0].fields[0].values[0])
+    console.log('last', cachedDataFramesEnding[0].fields[0].values[timeVals.length -1])
 
     const paginatingRequest = this.getPaginatingRequest(request, paginatingRequestRange);
 
     return {
       cachedResponse: {
-        data: cachedDataFrames,
-        key: requestId,
-        // FIXME: set state according to paginatingRequest
-        state: LoadingState.Streaming,
+        start: {
+          data: cachedDataFrames,
+          key: requestId,
+          // FIXME: set state according to paginatingRequest
+          state: LoadingState.Streaming,
+        },
+        end: {
+          data: cachedDataFramesEnding,
+          key: requestId,
+          // FIXME: set state according to paginatingRequest
+          state: LoadingState.Streaming,
+        },
       },
       paginatingRequest,
     };
@@ -197,7 +234,15 @@ export class TimeSeriesCache {
   static trimTimeSeriesDataFrames(cachedQueryInfos: CachedQueryInfo[], cacheRange: AbsoluteTimeRange): DataFrame[] {
     return cachedQueryInfos
       .map((cachedQueryInfo) => {
-        const { query: { queryType }, dataFrame } = cachedQueryInfo;
+        const { query: { queryType, timeOrdering }, dataFrame } = cachedQueryInfo;
+        if (timeOrdering === SiteWiseTimeOrder.DESCENDING) {
+          return {
+            ...dataFrame,
+            fields: [],
+            length: 0,
+          };
+        }
+
         if (queryType === QueryType.PropertyValue) {
           return {
             ...dataFrame,
@@ -215,6 +260,14 @@ export class TimeSeriesCache {
       });
   }
 
+  static trimTimeSeriesDataFramesEnding(cachedQueryInfos: CachedQueryInfo[], cacheRange: AbsoluteTimeRange): DataFrame[] {
+    return cachedQueryInfos
+      .filter((cachedQueryInfo) => (cachedQueryInfo.query.timeOrdering === SiteWiseTimeOrder.DESCENDING))
+      .map((cachedQueryInfo) => {
+        return TimeSeriesCache.trimTimeSeriesDataFrame(cachedQueryInfo, cacheRange);
+      });
+  }
+
   /**
    * 
    * @param cachedQueryInfo 
@@ -223,20 +276,33 @@ export class TimeSeriesCache {
    */
   private static trimTimeSeriesDataFrame(cachedQueryInfo: CachedQueryInfo, { from, to }: AbsoluteTimeRange): DataFrame {
     // 1. find the start index of the cache range
-    const { dataFrame: { fields } } = cachedQueryInfo;
+    const { dataFrame: { fields }, query: { timeOrdering } } = cachedQueryInfo;
     const timeField = fields.find(field => field.name === 'time')!;
 
-    const timeValues = timeField.values.toArray();
+    let timeValues = timeField.values.toArray();
+    if (timeOrdering === SiteWiseTimeOrder.DESCENDING) {
+      // Clone before reverse in place
+      timeValues = [...timeValues];
+      timeValues.reverse();
+    }
+
     let fromIndex = timeValues.findIndex(time => time > from);  // from is exclusive
     if (fromIndex === -1) {
       // no time value within range; include not data in the slice
-      fromIndex = timeValues.length;
+      fromIndex = timeValues.length ;
     }
 
-    let toIndex = timeValues.findIndex(time => time > to);  // to is inclusive
+    let toIndex = timeValues.findIndex(time => time >= to);  // to is inclusive
     if (toIndex === -1) {
       // all time values before `to`
       toIndex = timeValues.length;
+    }
+
+    if (timeOrdering === SiteWiseTimeOrder.DESCENDING) {
+      // Reverse the indices
+      const origFromIndex = fromIndex;
+      fromIndex = timeValues.length - 1 - toIndex;
+      toIndex = timeValues.length - 1 - origFromIndex;
     }
 
     const trimmedFields = fields.map(field => ({

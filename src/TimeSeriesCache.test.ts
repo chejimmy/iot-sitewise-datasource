@@ -1,6 +1,6 @@
 import { DataFrame, FieldType, dateTime } from "@grafana/data";
 import { TimeSeriesCache, parseSiteWiseQueriesCacheId } from "TimeSeriesCache";
-import { QueryType, SiteWiseQuality, SiteWiseResolution, SiteWiseResponseFormat, SitewiseQuery } from "types";
+import { QueryType, SiteWiseQuality, SiteWiseResolution, SiteWiseResponseFormat, SiteWiseTimeOrder, SitewiseQuery } from "types";
 
 function createSiteWiseQuery(id: number): SitewiseQuery {
   return {
@@ -21,6 +21,7 @@ function createSiteWiseQuery(id: number): SitewiseQuery {
       uid: 'mock-datasource-uid'
     },
     refId: `A-${id}`,
+    timeOrdering: SiteWiseTimeOrder.ASCENDING,
   };
 }
 
@@ -28,8 +29,8 @@ describe('parseSiteWiseQueriesCacheId', () => {
   it('parses SiteWise Queries into cache Id', () => {
     const actualId = parseSiteWiseQueriesCacheId([createSiteWiseQuery(1), createSiteWiseQuery(2)]);
     const expectedId = JSON.stringify([
-      '["PropertyValueHistory","us-west-2","table","mock-asset-id-1",["mock-asset-id-1"],"mock-property-id-1","mock-property-alias-1","ANY","AUTO",true,true,1000,"grafana-iot-sitewise-datasource","mock-datasource-uid"]',
-      '["PropertyValueHistory","us-west-2","table","mock-asset-id-2",["mock-asset-id-2"],"mock-property-id-2","mock-property-alias-2","ANY","AUTO",true,true,1000,"grafana-iot-sitewise-datasource","mock-datasource-uid"]'
+      '["PropertyValueHistory","us-west-2","table","mock-asset-id-1",["mock-asset-id-1"],"mock-property-id-1","mock-property-alias-1","ANY","AUTO",true,true,1000,"grafana-iot-sitewise-datasource","mock-datasource-uid","ASCENDING"]',
+      '["PropertyValueHistory","us-west-2","table","mock-asset-id-2",["mock-asset-id-2"],"mock-property-id-2","mock-property-alias-2","ANY","AUTO",true,true,1000,"grafana-iot-sitewise-datasource","mock-datasource-uid","ASCENDING"]'
     ]);
 
     expect(actualId).toEqual(expectedId);
@@ -38,6 +39,7 @@ describe('parseSiteWiseQueriesCacheId', () => {
   it('parses SiteWise Query properties in a stable fasion (disregard of the order queries and queries\' properties are added)', () => {
     // Reversed order of properties
     const query1: SitewiseQuery = {
+      timeOrdering: SiteWiseTimeOrder.ASCENDING,
       refId: "A-1",
       datasource: {
         uid: 'mock-datasource-uid',
@@ -75,7 +77,7 @@ describe('parseSiteWiseQueriesCacheId', () => {
     };
     const actualId = parseSiteWiseQueriesCacheId([query]);
     const expectedId = JSON.stringify([
-      '["ListAssets",null,null,null,null,null,null,null,null,null,null,null,null,null]',
+      '["ListAssets",null,null,null,null,null,null,null,null,null,null,null,null,null,null]',
     ]);
 
     expect(actualId).toEqual(expectedId);

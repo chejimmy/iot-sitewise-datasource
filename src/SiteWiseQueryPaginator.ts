@@ -13,7 +13,10 @@ export interface SitewiseQueryPaginatorOptions {
   // The function to call to execute the query.
   queryFn: (request: DataQueryRequest<SitewiseQuery>) => Promise<DataQueryResponse>;
   // The cached response to set as the initial response.
-  cachedResponse?: DataQueryResponse;
+  cachedResponse?: {
+    start?: DataQueryResponse,
+    end?: DataQueryResponse,
+  },
 }
 
 /**
@@ -39,8 +42,8 @@ export class SitewiseQueryPaginator {
     const { request: { requestId }, cachedResponse } = this.options;
     const subject = new Subject<DataQueryResponse>();
 
-    if (cachedResponse != null) {
-      subject.next({ ...cachedResponse, state: LoadingState.Streaming, key: requestId });
+    if (cachedResponse?.start) {
+      subject.next({ ...cachedResponse.start, state: LoadingState.Streaming, key: requestId });
     }
 
     this.paginateQuery(subject);
@@ -58,7 +61,7 @@ export class SitewiseQueryPaginator {
     let paginatingRequest = initialRequest;
 
     try {
-      let retrievedData = cachedResponse?.data;
+      let retrievedData = cachedResponse?.start?.data;
       let nextQueries: SitewiseNextQuery[] | undefined;
       let count = 1;
 
@@ -84,10 +87,15 @@ export class SitewiseQueryPaginator {
         }
 
         nextQueries = getNextQueries(paginatingRequest, response);
-        const loadingState = nextQueries ? LoadingState.Streaming : LoadingState.Done;
+        const loadingState = nextQueries || cachedResponse?.start != null ? LoadingState.Streaming : LoadingState.Done;
 
         subject.next({ ...response, data: retrievedData, state: loadingState, key: requestId });
       } while (nextQueries != null && !subject.closed);
+
+      if (cachedResponse?.end != null) {
+        retrievedData = appendMatchingFrames(retrievedData, cachedResponse.end.data);
+        subject.next({ ...cachedResponse.end, data: retrievedData , state: LoadingState.Done, key: requestId });
+      }
 
       subject.complete();
     } catch (err) {
