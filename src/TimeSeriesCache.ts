@@ -1,4 +1,5 @@
 import { AbsoluteTimeRange, ArrayVector, DataFrame, DataQueryRequest, DataQueryResponse, LoadingState, TimeRange, dateTime } from '@grafana/data';
+import { trimTimeSeriesDataFrame, trimTimeSeriesDataFrameReversed } from 'dataFrameUtils';
 import { QueryType, SiteWiseTimeOrder, SitewiseQuery } from 'types';
 
 // The time range (in minutes) to always request for regardless of cache.
@@ -30,6 +31,10 @@ function parseSiteWiseQueryCacheId(query: SitewiseQuery): QueryCacheId {
     maxPageAggregations,
     datasource,
     timeOrdering,
+    loadAllChildren,
+    hierarchyId,
+    modelId,
+    filter,
   } = query;
 
   /*
@@ -52,6 +57,10 @@ function parseSiteWiseQueryCacheId(query: SitewiseQuery): QueryCacheId {
     datasource?.type,
     datasource?.uid,
     timeOrdering,
+    loadAllChildren,
+    hierarchyId,
+    modelId,
+    filter,
   ]);
 }
 export function parseSiteWiseQueriesCacheId(queries: SitewiseQuery[]): QueryCacheId {
@@ -85,7 +94,6 @@ export interface TimeSeriesCacheInfo {
 export class TimeSeriesCache {
   private responseDataMap = new Map<QueryCacheId, RelativeTimeDataFramesMap>();
 
-  // FIXME: do not cache property value (latest value)
   set(request: DataQueryRequest<SitewiseQuery>, response: DataQueryResponse) {
     // this.prevRequest = request;
     // this.prevResponse = response;
@@ -136,7 +144,6 @@ export class TimeSeriesCache {
     const { raw: { from: rawFrom }  } = requestRange;
 
     // TODO: restrict to relative time from now only
-    // TODO: restrict to greater than 15 minutes
     // Set cache for time series data only
     if (typeof rawFrom !== 'string') {
       return undefined;
@@ -155,11 +162,6 @@ export class TimeSeriesCache {
     }
 
     const paginatingRequestRange = TimeSeriesCache.getPaginatingRequestRange(requestRange, cachedDataInfo.range);
-    
-    const trimFrom = requestRange.from.valueOf();
-    const trimTo = paginatingRequestRange.from.valueOf();
-    console.log('trimFrom', new Date(trimFrom));
-    console.log('trimTo', new Date(trimTo));
 
     const cachedDataFrames = TimeSeriesCache.trimTimeSeriesDataFrames(cachedDataInfo.queries, {
       from: requestRange.from.valueOf(),
@@ -169,10 +171,6 @@ export class TimeSeriesCache {
       from: requestRange.from.valueOf(),
       to: paginatingRequestRange.from.valueOf(),
     });
-
-    const timeVals = cachedDataFramesEnding[0].fields[0].values;
-    console.log('first', cachedDataFramesEnding[0].fields[0].values[0])
-    console.log('last', cachedDataFramesEnding[0].fields[0].values[timeVals.length -1])
 
     const paginatingRequest = this.getPaginatingRequest(request, paginatingRequestRange);
 
@@ -252,7 +250,11 @@ export class TimeSeriesCache {
         }
 
         if (TIME_SERIES_QUERY_TYPES.has(queryType)) {
-          return TimeSeriesCache.trimTimeSeriesDataFrame(cachedQueryInfo, cacheRange);
+          return trimTimeSeriesDataFrame({
+            dataFrame: cachedQueryInfo.dataFrame,
+            timeRange: cacheRange,
+            lastObservation: cachedQueryInfo.query.lastObservation,
+          });
         }
 
         // No trimming needed
@@ -264,63 +266,15 @@ export class TimeSeriesCache {
     return cachedQueryInfos
       .filter((cachedQueryInfo) => (cachedQueryInfo.query.timeOrdering === SiteWiseTimeOrder.DESCENDING))
       .map((cachedQueryInfo) => {
-        return TimeSeriesCache.trimTimeSeriesDataFrame(cachedQueryInfo, cacheRange);
+        return trimTimeSeriesDataFrameReversed({
+          dataFrame: cachedQueryInfo.dataFrame,
+          lastObservation: cachedQueryInfo.query.lastObservation,
+          timeRange: cacheRange,
+        });
       });
   }
 
-  /**
-   * 
-   * @param cachedQueryInfo 
-   * @param cacheRange the range of cache to include; `cacheRange.from` is exclusive and `cacheRange.to` is inclusive
-   * @returns 
-   */
-  private static trimTimeSeriesDataFrame(cachedQueryInfo: CachedQueryInfo, { from, to }: AbsoluteTimeRange): DataFrame {
-    // 1. find the start index of the cache range
-    const { dataFrame: { fields }, query: { timeOrdering } } = cachedQueryInfo;
-    const timeField = fields.find(field => field.name === 'time')!;
-
-    let timeValues = timeField.values.toArray();
-    if (timeOrdering === SiteWiseTimeOrder.DESCENDING) {
-      // Clone before reverse in place
-      timeValues = [...timeValues];
-      timeValues.reverse();
-    }
-
-    let fromIndex = timeValues.findIndex(time => time > from);  // from is exclusive
-    if (fromIndex === -1) {
-      // no time value within range; include not data in the slice
-      fromIndex = timeValues.length ;
-    }
-
-    let toIndex = timeValues.findIndex(time => time >= to);  // to is inclusive
-    if (toIndex === -1) {
-      // all time values before `to`
-      toIndex = timeValues.length;
-    }
-
-    if (timeOrdering === SiteWiseTimeOrder.DESCENDING) {
-      // Reverse the indices
-      const origFromIndex = fromIndex;
-      fromIndex = timeValues.length - 1 - toIndex;
-      toIndex = timeValues.length - 1 - origFromIndex;
-    }
-
-    const trimmedFields = fields.map(field => ({
-      ...field,
-      values: new ArrayVector(field.values.toArray().slice(fromIndex, toIndex)),
-    }));
-    
-    // TODO: be careful about Expand Time Range
-    return {
-      ...cachedQueryInfo.dataFrame,
-      fields: trimmedFields,
-      length: trimmedFields[0].values.length,
-    };
-  }
-
-  // FIXME: account for cache end time
   private getPaginatingRequest(request: DataQueryRequest<SitewiseQuery>, range: TimeRange) {
-    // FIXME: always request for property value (latest value)
     const {
       targets,
     } = request;

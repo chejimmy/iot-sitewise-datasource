@@ -22,6 +22,10 @@ function createSiteWiseQuery(id: number): SitewiseQuery {
     },
     refId: `A-${id}`,
     timeOrdering: SiteWiseTimeOrder.ASCENDING,
+    loadAllChildren: true,
+    hierarchyId: `mock-hierarchy-${id}`,
+    modelId: `mock-model-${id}`,
+    filter: 'ALL',
   };
 }
 
@@ -29,8 +33,8 @@ describe('parseSiteWiseQueriesCacheId', () => {
   it('parses SiteWise Queries into cache Id', () => {
     const actualId = parseSiteWiseQueriesCacheId([createSiteWiseQuery(1), createSiteWiseQuery(2)]);
     const expectedId = JSON.stringify([
-      '["PropertyValueHistory","us-west-2","table","mock-asset-id-1",["mock-asset-id-1"],"mock-property-id-1","mock-property-alias-1","ANY","AUTO",true,true,1000,"grafana-iot-sitewise-datasource","mock-datasource-uid","ASCENDING"]',
-      '["PropertyValueHistory","us-west-2","table","mock-asset-id-2",["mock-asset-id-2"],"mock-property-id-2","mock-property-alias-2","ANY","AUTO",true,true,1000,"grafana-iot-sitewise-datasource","mock-datasource-uid","ASCENDING"]'
+      '["PropertyValueHistory","us-west-2","table","mock-asset-id-1",["mock-asset-id-1"],"mock-property-id-1","mock-property-alias-1","ANY","AUTO",true,true,1000,"grafana-iot-sitewise-datasource","mock-datasource-uid","ASCENDING",true,"mock-hierarchy-1","mock-model-1","ALL"]',
+      '["PropertyValueHistory","us-west-2","table","mock-asset-id-2",["mock-asset-id-2"],"mock-property-id-2","mock-property-alias-2","ANY","AUTO",true,true,1000,"grafana-iot-sitewise-datasource","mock-datasource-uid","ASCENDING",true,"mock-hierarchy-2","mock-model-2","ALL"]'
     ]);
 
     expect(actualId).toEqual(expectedId);
@@ -77,7 +81,7 @@ describe('parseSiteWiseQueriesCacheId', () => {
     };
     const actualId = parseSiteWiseQueriesCacheId([query]);
     const expectedId = JSON.stringify([
-      '["ListAssets",null,null,null,null,null,null,null,null,null,null,null,null,null,null]',
+      '["ListAssets",null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null]',
     ]);
 
     expect(actualId).toEqual(expectedId);
@@ -152,8 +156,7 @@ describe('TimeSeriesCache', () => {
       to: dateTime('2024-05-28T00:15:00Z').valueOf(),
     };
 
-    const dataFrame: DataFrame =
-    {
+    const dataFrame: DataFrame = {
       name: 'Demo Turbine Asset 1',
       refId: 'A',
       fields: [
@@ -163,9 +166,9 @@ describe('TimeSeriesCache', () => {
           config: {},
           values: [
             1716854400000,  // 2024-05-28T00:00:00Z
-            1716854400001,  // +1ms
+            1716854400001,  // 2024-05-28T00:15:00Z + 1ms
             1716855300000,  // 2024-05-28T00:15:00Z
-            1716855300001,  // +1ms
+            1716855300001,  // 2024-05-28T00:15:00Z + 1ms
           ],
         },
         {
@@ -180,6 +183,33 @@ describe('TimeSeriesCache', () => {
             3,
             4,
           ],
+        },
+      ],
+      length: 4
+    };
+
+    const dataFrameDescending: DataFrame = {
+      name: 'Demo Turbine Asset 1',
+      refId: 'A',
+      fields: [
+        {
+          name: 'time',
+          type: FieldType.time,
+          config: {},
+          values: [
+            1716855300001,  // 2024-05-28T00:15:00Z + 1ms
+            1716855300000,  // 2024-05-28T00:15:00Z
+            1716854400001,  // 2024-05-28T00:00:00Z + 1ms
+            1716854400000,  // 2024-05-28T00:00:00Z
+          ],
+        },
+        {
+          name: 'RotationsPerSecond',
+          type: FieldType.number,
+          config: {
+            unit: 'RPS'
+          },
+          values: [4,3,2,1],
         },
       ],
       length: 4
@@ -228,7 +258,7 @@ describe('TimeSeriesCache', () => {
       QueryType.PropertyAggregate,
       QueryType.PropertyInterpolated,
       QueryType.PropertyValueHistory,
-    ])('trims time series data of time-series type - %s', (queryType: QueryType) => {
+    ])('trims time series data of time-series type - "%s"', (queryType: QueryType) => {
       const cachedQueryInfo = {
         query: {
           queryType,
@@ -264,6 +294,49 @@ describe('TimeSeriesCache', () => {
         length: 2
       };
       const dataFrames = TimeSeriesCache.trimTimeSeriesDataFrames([cachedQueryInfo], absolutionRange);
+
+      expect(dataFrames).toHaveLength(1);
+      expect(dataFrames).toContainEqual(expectedDataFrame);
+    });
+
+    it.each([
+      QueryType.PropertyAggregate,
+      QueryType.PropertyInterpolated,
+      QueryType.PropertyValueHistory,
+    ])('trims descending time series data of time-series type - "%s"', (queryType: QueryType) => {
+      const cachedQueryInfo = {
+        query: {
+          queryType,
+          refId: 'A',
+          timeOrdering: SiteWiseTimeOrder.DESCENDING,
+        },
+        dataFrame: dataFrameDescending,
+      };
+      const expectedDataFrame: DataFrame = {
+        name: 'Demo Turbine Asset 1',
+        refId: 'A',
+        fields: [
+          {
+            name: 'time',
+            type: FieldType.time,
+            config: {},
+            values: [
+              1716855300000,  // 2024-05-28T00:15:00Z
+              1716854400001,  // 2024-05-28T00:00:00Z+1ms
+            ],
+          },
+          {
+            name: 'RotationsPerSecond',
+            type: FieldType.number,
+            config: {
+              unit: 'RPS'
+            },
+            values: [3,2],
+          },
+        ],
+        length: 2
+      };
+      const dataFrames = TimeSeriesCache.trimTimeSeriesDataFramesEnding([cachedQueryInfo], absolutionRange);
 
       expect(dataFrames).toHaveLength(1);
       expect(dataFrames).toContainEqual(expectedDataFrame);

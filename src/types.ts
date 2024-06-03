@@ -68,7 +68,12 @@ export interface SitewiseQuery extends DataQuery {
   lastObservation?: boolean;
   flattenL4e?: boolean;
   maxPageAggregations?: number;
+  // FIXME: maybe the following types shouldn't be here
   timeOrdering?: SiteWiseTimeOrder;
+  loadAllChildren?: boolean;
+  hierarchyId?: string;
+  modelId?: string;
+  filter?: 'ALL' | 'TOP_LEVEL';
 }
 
 export interface SitewiseNextQuery extends SitewiseQuery {
