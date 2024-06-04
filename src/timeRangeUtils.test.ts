@@ -1,5 +1,5 @@
-import { dateTime } from "@grafana/data";
-import { isTimeRangeCoveringStart, minDateTime } from "timeRangeUtils";
+import { dateTime } from '@grafana/data';
+import { isRelativeFromNow, isTimeRangeCoveringStart, minDateTime } from 'timeRangeUtils';
 
 describe('isTimeRangeCoveringStart()', () => {
   it('returns true when subject and object both starting at the same time.', () => {
@@ -63,11 +63,40 @@ describe('isTimeRangeCoveringStart()', () => {
 });
 
 describe('minDateTime()', () => {
-  it('returns the mininum DateTime', () => {
+  it('returns the minimum DateTime', () => {
     expect(minDateTime(
       dateTime(0),
       dateTime(1),
       dateTime(2),
     )).toEqual(dateTime(0));
+  });
+});
+
+describe('isRelativeFromNow()', () => {
+  it('returns true for TimeRange with relative times to now', () => {
+    expect(isRelativeFromNow({
+      from: 'now-1h', to: 'now',
+    })).toBe(true);
+  });
+
+  it('returns false for TimeRange with absolute times', () => {
+    expect(isRelativeFromNow({
+      from: '2024-05-28T00:00:00Z',
+      to: '2024-05-28T01:00:00Z',
+    })).toBe(false);
+  });
+
+  it('returns false for TimeRange with absolute from time', () => {
+    expect(isRelativeFromNow({
+      from: '2024-05-28T00:00:00Z',
+      to: 'now',
+    })).toBe(false);
+  });
+
+  it('returns false for TimeRange with absolute to time', () => {
+    expect(isRelativeFromNow({
+      from: 'now-1',
+      to: '2024-05-28T00:00:00Z',
+    })).toBe(false);
   });
 });

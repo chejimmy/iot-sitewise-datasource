@@ -1,4 +1,4 @@
-import { DateTime, TimeRange, dateTime } from "@grafana/data";
+import { DateTime, RawTimeRange, TimeRange, dateTime } from '@grafana/data';
 
 /**
  * Checks if the subject TimeRange covers the start time of the object TimeRange.
@@ -43,4 +43,14 @@ export function isTimeRangeCoveringStart(subjectRange: TimeRange, objectRange: T
 export function minDateTime(firstDateTimes: DateTime, ...dateTimes: DateTime[]) {
   const minValue = Math.min(firstDateTimes.valueOf(), ...dateTimes.map((dateTime) => dateTime.valueOf()));
   return dateTime(minValue);
+}
+
+export function isRelativeFromNow(timeRange: RawTimeRange): boolean {
+  const { from, to } = timeRange;
+
+  if (typeof from !== 'string' || typeof to !== 'string') {
+    return false;
+  }
+
+  return from.startsWith('now-') && to === 'now';
 }

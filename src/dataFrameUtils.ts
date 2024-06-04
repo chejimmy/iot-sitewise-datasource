@@ -1,6 +1,6 @@
-import { AbsoluteTimeRange, ArrayVector, DataFrame, FieldType } from "@grafana/data";
+import { AbsoluteTimeRange, ArrayVector, DataFrame, FieldType } from '@grafana/data';
 
-interface trimParams {
+interface TrimParams {
   dataFrame: DataFrame;
   timeRange: AbsoluteTimeRange;
   lastObservation?: boolean;
@@ -18,7 +18,7 @@ export function trimTimeSeriesDataFrame({
   dataFrame,
   timeRange: { from, to },
   lastObservation,
-}: trimParams): DataFrame {
+}: TrimParams): DataFrame {
   const { fields } = dataFrame;
   if (fields == null || fields.length === 0) {
     return {
@@ -75,7 +75,7 @@ export function trimTimeSeriesDataFrameReversedTime({
   dataFrame,
   timeRange: { from, to },
   lastObservation,
-}: trimParams): DataFrame {
+}: TrimParams): DataFrame {
   const { fields } = dataFrame;
   if (fields == null || fields.length === 0) {
     return {

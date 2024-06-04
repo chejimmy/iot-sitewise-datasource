@@ -26,7 +26,7 @@ export const siteWiseQueryTypes: QueryTypeInfo[] = [
   {
     label: 'Get property value aggregates',
     value: QueryType.PropertyAggregate,
-    description: `Gets aggregated values for an asset property.`,
+    description: 'Gets aggregated values for an asset property.',
     defaultQuery: {
       resolution: SiteWiseResolution.Auto,
       aggregates: [AggregateType.AVERAGE],
@@ -37,7 +37,7 @@ export const siteWiseQueryTypes: QueryTypeInfo[] = [
   {
     label: 'Get interpolated property values',
     value: QueryType.PropertyInterpolated,
-    description: `Gets interpolated values for an asset property.`,
+    description: 'Gets interpolated values for an asset property.',
     defaultQuery: {
       timeOrdering: 'ASCENDING',
     } as AssetPropertyInterpolatedQuery,
@@ -46,7 +46,7 @@ export const siteWiseQueryTypes: QueryTypeInfo[] = [
   {
     label: 'Get property value history',
     value: QueryType.PropertyValueHistory,
-    description: `Gets the history of an asset property's value.`,
+    description: 'Gets the history of an asset property\'s value.',
     defaultQuery: {
       timeOrdering: 'ASCENDING',
     } as AssetPropertyValueHistoryQuery,
@@ -55,7 +55,7 @@ export const siteWiseQueryTypes: QueryTypeInfo[] = [
   {
     label: 'Get property value',
     value: QueryType.PropertyValue,
-    description: `Gets an asset property's current value.`,
+    description: 'Gets an asset property\'s current value.',
     defaultQuery: {} as AssetPropertyValueQuery,
     helpURL: 'https://docs.aws.amazon.com/iot-sitewise/latest/APIReference/API_GetAssetPropertyAggregates.html',
   },

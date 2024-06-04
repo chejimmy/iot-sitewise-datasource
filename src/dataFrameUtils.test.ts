@@ -1,5 +1,5 @@
-import { DataFrame, FieldType, dateTime } from "@grafana/data";
-import { trimTimeSeriesDataFrame, trimTimeSeriesDataFrameReversedTime } from "./dataFrameUtils"
+import { DataFrame, FieldType, dateTime } from '@grafana/data';
+import { trimTimeSeriesDataFrame, trimTimeSeriesDataFrameReversedTime } from './dataFrameUtils'
 
 describe('trimTimeSeriesDataFrame()', () => {
   const timeRange = {

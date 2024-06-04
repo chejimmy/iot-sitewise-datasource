@@ -1,5 +1,5 @@
-import { DataFrame, DataQueryRequest, DataQueryResponse } from "@grafana/data";
-import { SitewiseCustomMeta, SitewiseNextQuery, SitewiseQuery } from "types";
+import { DataFrame, DataQueryRequest, DataQueryResponse } from '@grafana/data';
+import { SitewiseCustomMeta, SitewiseNextQuery, SitewiseQuery } from 'types';
 
 
 export function getNextQueries(request: DataQueryRequest<SitewiseQuery>, rsp: DataQueryResponse) {

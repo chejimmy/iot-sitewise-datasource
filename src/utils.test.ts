@@ -14,7 +14,7 @@ describe('Test utils', () => {
       ]
     `);
     const dfPropertyValue = dataFrameFromJSON(getPropertyValueResponse as DataFrameJSON);
-    expect(frameToMetricFindValues(dfPropertyValue)).toMatchInlineSnapshot(`[]`);
+    expect(frameToMetricFindValues(dfPropertyValue)).toMatchInlineSnapshot('[]');
   });
 });
 

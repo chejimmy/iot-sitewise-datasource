@@ -68,8 +68,8 @@ const getStyles = (theme: GrafanaTheme2) => ({
     paddingTop: 0,
   }),
   collapseRow: css({
-    display: 'flex',
-    flexDirection: 'column',
+    'display': 'flex',
+    'flexDirection': 'column',
     '>div': {
       alignItems: 'baseline',
       justifyContent: 'flex-end',

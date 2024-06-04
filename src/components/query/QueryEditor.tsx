@@ -28,7 +28,7 @@ export function QueryEditor(props: Props) {
   const query = defaults(props.query, queryDefaults);
 
   const defaultRegion: SelectableValue<string> = {
-    label: `Default`,
+    label: 'Default',
     description: datasource.options?.defaultRegion,
     value: undefined,
   };

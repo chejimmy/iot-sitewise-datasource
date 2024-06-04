@@ -16,13 +16,13 @@ import { tap } from 'rxjs/operators';
 import { frameToMetricFindValues } from 'utils';
 import { SitewiseVariableSupport } from 'variables';
 import { SitewiseQueryPaginator } from 'SiteWiseQueryPaginator';
-import { TimeSeriesCache } from 'TimeSeriesCache';
+import { RelativeRangeCache } from 'RelativeRangeRequestCache/RelativeRangeCache';
 
 export class DataSource extends DataSourceWithBackend<SitewiseQuery, SitewiseOptions> {
   // Easy access for QueryEditor
   readonly options: SitewiseOptions;
   private cache = new Map<string, SitewiseCache>();
-  private timeSeriesCache = new TimeSeriesCache();
+  private relativeRangeCache = new RelativeRangeCache();
 
   constructor(instanceSettings: DataSourceInstanceSettings<SitewiseOptions>) {
     super(instanceSettings);
@@ -145,8 +145,7 @@ export class DataSource extends DataSourceWithBackend<SitewiseQuery, SitewiseOpt
   }
 
   query(request: DataQueryRequest<SitewiseQuery>): Observable<DataQueryResponse> {
-    // FIXME: get cache for time series data only?
-    const cachedInfo = request.range != null ? this.timeSeriesCache.get(request) : undefined;
+    const cachedInfo = request.range != null ? this.relativeRangeCache.get(request) : undefined;
 
     return new SitewiseQueryPaginator({
       request: cachedInfo?.paginatingRequest || request,
@@ -160,7 +159,7 @@ export class DataSource extends DataSourceWithBackend<SitewiseQuery, SitewiseOpt
       tap({
         next: (response) => {
           if (response.state === LoadingState.Done && request.range != null) {
-            this.timeSeriesCache.set(request, response);
+            this.relativeRangeCache.set(request, response);
           }
         },
       },)
