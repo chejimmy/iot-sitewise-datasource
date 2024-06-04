@@ -1,5 +1,6 @@
-import { AbsoluteTimeRange, ArrayVector, DataFrame, DataQueryRequest, DataQueryResponse, LoadingState, TimeRange, dateTime } from '@grafana/data';
-import { trimTimeSeriesDataFrame, trimTimeSeriesDataFrameReversed } from 'dataFrameUtils';
+import { AbsoluteTimeRange, DataFrame, DataQueryRequest, DataQueryResponse, LoadingState, TimeRange, dateTime } from '@grafana/data';
+import { trimTimeSeriesDataFrame, trimTimeSeriesDataFrameReversedTime } from 'dataFrameUtils';
+import { isTimeRangeCoveringStart, minDateTime } from 'timeRangeUtils';
 import { QueryType, SiteWiseTimeOrder, SitewiseQuery } from 'types';
 
 // The time range (in minutes) to always request for regardless of cache.
@@ -94,6 +95,11 @@ export interface TimeSeriesCacheInfo {
 export class TimeSeriesCache {
   private responseDataMap = new Map<QueryCacheId, RelativeTimeDataFramesMap>();
 
+  /**
+   * Set the cache for the given query and response.
+   * @param request The query used to get the response
+   * @param response The response to set the cache for
+   */
   set(request: DataQueryRequest<SitewiseQuery>, response: DataQueryResponse) {
     // this.prevRequest = request;
     // this.prevResponse = response;
@@ -109,14 +115,6 @@ export class TimeSeriesCache {
     // TODO: restrict to relative time from now
     if (typeof from !== 'string') {
       return;
-    }
-
-    let times = response.data[0].fields[0].values.toArray()
-    let prev = Number.MAX_SAFE_INTEGER;
-    for (let i = 0; i < times.length; i++) {
-      if (times > prev) {
-        debugger;
-      }
     }
 
     const queryIdMap = new Map(queries.map(q => [q.refId, q]));
@@ -139,8 +137,54 @@ export class TimeSeriesCache {
     });
   }
 
+  /**
+   * Get the cached response for the given request.
+   * @param request The request to get the cached response for
+   * @returns The cached response if found, undefined otherwise
+   */
   get(request: DataQueryRequest<SitewiseQuery>): TimeSeriesCacheInfo | undefined {
-    const { range: requestRange, requestId, targets: queries } = request;
+    const { range: requestRange } = request;
+
+    if (!this.isCacheableTimeRange(request.range)) {
+      return undefined;
+    }
+
+    const cachedDataInfo = this.lookupCachedData(request);
+    
+    if (cachedDataInfo == null || !isTimeRangeCoveringStart(cachedDataInfo.range, requestRange)) {
+      return undefined;
+    }
+
+    return this.parseCacheInfo(cachedDataInfo, request);
+  }
+
+  /**
+   * Check if the given TimeRange is cacheable. A TimeRange is cacheable if it is relative and has data 15 minutes ago.
+   * @param TimeRange to check
+   * @returns true if the TimeRange is cacheable, false otherwise
+   */
+  private isCacheableTimeRange({ from, raw: { from: rawFrom }, to }: TimeRange) {
+    // TODO: restrict to relative time from now only
+    // Set cache for time series data only
+    if (typeof rawFrom !== 'string') {
+      return false;
+    }
+
+    const defaultRefreshAgo = dateTime(to).subtract(DEFAULT_TIME_SERIES_REFRESH_MINUTES, 'minutes');
+    if (!from.isBefore(defaultRefreshAgo)) {
+      return false;
+    }
+
+    return true;
+  }
+
+  /**
+   * Lookup cached data for the given request.
+   * @param request DataQueryRequest<SitewiseQuery> request to lookup cached data for
+   * @returns Cached data info if found, undefined otherwise
+   */
+  private lookupCachedData(request: DataQueryRequest<SitewiseQuery>) {
+    const { range: requestRange, targets: queries } = request;
     const { raw: { from: rawFrom }  } = requestRange;
 
     // TODO: restrict to relative time from now only
@@ -156,10 +200,11 @@ export class TimeSeriesCache {
 
     const queryCacheId = parseSiteWiseQueriesCacheId(queries);
     const cachedDataInfo = this.responseDataMap.get(queryCacheId)?.get(rawFrom);
-    
-    if (cachedDataInfo == null || !TimeSeriesCache.isCacheRequestOverlapping(cachedDataInfo.range, requestRange)) {
-      return undefined;
-    }
+    return cachedDataInfo;
+  }
+
+  private parseCacheInfo(cachedDataInfo: DataFrameCacheInfo, request: DataQueryRequest<SitewiseQuery>) {
+    const { range: requestRange, requestId } = request;
 
     const paginatingRequestRange = TimeSeriesCache.getPaginatingRequestRange(requestRange, cachedDataInfo.range);
 
@@ -172,20 +217,18 @@ export class TimeSeriesCache {
       to: paginatingRequestRange.from.valueOf(),
     });
 
-    const paginatingRequest = this.getPaginatingRequest(request, paginatingRequestRange);
+    const paginatingRequest = TimeSeriesCache.getPaginatingRequest(request, paginatingRequestRange);
 
     return {
       cachedResponse: {
         start: {
           data: cachedDataFrames,
           key: requestId,
-          // FIXME: set state according to paginatingRequest
           state: LoadingState.Streaming,
         },
         end: {
           data: cachedDataFramesEnding,
           key: requestId,
-          // FIXME: set state according to paginatingRequest
           state: LoadingState.Streaming,
         },
       },
@@ -193,47 +236,13 @@ export class TimeSeriesCache {
     };
   }
 
-  /**
-   * Check whether the cached time range is overlapping with the request and covers the start of the request.
-   */
-  static isCacheRequestOverlapping(cacheRange: TimeRange, requestRange: TimeRange): boolean {
-    const { from: cacheFrom, to: cacheTo } = cacheRange;
-    const { from: requestFrom } = requestRange;
-
-    /*
-     * True if both request and cache start at the same time.
-     *
-     * Positive example (same from time):
-     *   cache:   <from>...
-     *   request: <from>...
-     */
-    if (requestFrom.isSame(cacheFrom)) {
-      return true;
-    }
-
-    /*
-     * True if cache starts before request starts and overlaps the request start time
-     *
-     * Positive example (cache from and to wrap around request from):
-     *   cache:   <from>......<to>
-     *   request: ......<from>....(disregard to)
-     *
-     * Negative example (cache from and to both before request):
-     *   cache:   <from>.<to>.......
-     *   request: ...........<from>.(disregard to)
-     */
-    if (cacheFrom.isBefore(requestFrom) && requestFrom.isBefore(cacheTo)) {
-      return true;
-    }
-
-    return false;
-  }
-
   static trimTimeSeriesDataFrames(cachedQueryInfos: CachedQueryInfo[], cacheRange: AbsoluteTimeRange): DataFrame[] {
     return cachedQueryInfos
       .map((cachedQueryInfo) => {
         const { query: { queryType, timeOrdering }, dataFrame } = cachedQueryInfo;
         if (timeOrdering === SiteWiseTimeOrder.DESCENDING) {
+          // Decending ordering data frame are added at the end of the request to respect the ordering
+          // See related function - trimTimeSeriesDataFramesEnding()
           return {
             ...dataFrame,
             fields: [],
@@ -241,6 +250,7 @@ export class TimeSeriesCache {
           };
         }
 
+        // Always refresh PropertyValue
         if (queryType === QueryType.PropertyValue) {
           return {
             ...dataFrame,
@@ -266,7 +276,7 @@ export class TimeSeriesCache {
     return cachedQueryInfos
       .filter((cachedQueryInfo) => (cachedQueryInfo.query.timeOrdering === SiteWiseTimeOrder.DESCENDING))
       .map((cachedQueryInfo) => {
-        return trimTimeSeriesDataFrameReversed({
+        return trimTimeSeriesDataFrameReversedTime({
           dataFrame: cachedQueryInfo.dataFrame,
           lastObservation: cachedQueryInfo.query.lastObservation,
           timeRange: cacheRange,
@@ -274,7 +284,7 @@ export class TimeSeriesCache {
       });
   }
 
-  private getPaginatingRequest(request: DataQueryRequest<SitewiseQuery>, range: TimeRange) {
+  static getPaginatingRequest(request: DataQueryRequest<SitewiseQuery>, range: TimeRange) {
     const {
       targets,
     } = request;
@@ -287,9 +297,8 @@ export class TimeSeriesCache {
   }
 
   private static getPaginatingRequestRange(requestRange: TimeRange, cacheRange: TimeRange) {
-    const { to: cacheTo } = cacheRange;
     const defaultRefreshAgo = dateTime(requestRange.to).subtract(DEFAULT_TIME_SERIES_REFRESH_MINUTES, 'minutes');
-    const from = defaultRefreshAgo.isBefore(cacheTo) ? defaultRefreshAgo : cacheTo;
+    const from = minDateTime(cacheRange.to, defaultRefreshAgo);
 
     return {
       from,

@@ -87,11 +87,12 @@ export class SitewiseQueryPaginator {
         }
 
         nextQueries = getNextQueries(paginatingRequest, response);
-        const loadingState = nextQueries || cachedResponse?.start != null ? LoadingState.Streaming : LoadingState.Done;
+        const loadingState = nextQueries || cachedResponse?.end != null ? LoadingState.Streaming : LoadingState.Done;
 
         subject.next({ ...response, data: retrievedData, state: loadingState, key: requestId });
       } while (nextQueries != null && !subject.closed);
 
+      // FIXME: handle error state
       if (cachedResponse?.end != null) {
         retrievedData = appendMatchingFrames(retrievedData, cachedResponse.end.data);
         subject.next({ ...cachedResponse.end, data: retrievedData , state: LoadingState.Done, key: requestId });

@@ -1,5 +1,5 @@
 import { DataFrame, FieldType, dateTime } from "@grafana/data";
-import { trimTimeSeriesDataFrame, trimTimeSeriesDataFrameReversed } from "./dataFrameUtils"
+import { trimTimeSeriesDataFrame, trimTimeSeriesDataFrameReversedTime } from "./dataFrameUtils"
 
 describe('trimTimeSeriesDataFrame()', () => {
   const timeRange = {
@@ -264,7 +264,7 @@ describe('trimTimeSeriesDataFrameReversed()', () => {
       ],
       length: 2
     };
-    const dataFrame = trimTimeSeriesDataFrameReversed(trimParams);
+    const dataFrame = trimTimeSeriesDataFrameReversedTime(trimParams);
 
     expect(dataFrame).toEqual(expectedDataFrame);
   });
@@ -300,7 +300,7 @@ describe('trimTimeSeriesDataFrameReversed()', () => {
       ],
       length: 3
     };
-    const dataFrame = trimTimeSeriesDataFrameReversed(trimParams);
+    const dataFrame = trimTimeSeriesDataFrameReversedTime(trimParams);
 
     expect(dataFrame).toEqual(expectedDataFrame);
   });
@@ -333,7 +333,7 @@ describe('trimTimeSeriesDataFrameReversed()', () => {
       ],
       length: 1
     };
-    const dataFrame = trimTimeSeriesDataFrameReversed(trimParams);
+    const dataFrame = trimTimeSeriesDataFrameReversedTime(trimParams);
 
     expect(dataFrame).toEqual(expectedDataFrame);
   });

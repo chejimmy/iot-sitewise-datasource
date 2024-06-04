@@ -29,7 +29,7 @@ function createSiteWiseQuery(id: number): SitewiseQuery {
   };
 }
 
-describe('parseSiteWiseQueriesCacheId', () => {
+describe('parseSiteWiseQueriesCacheId()', () => {
   it('parses SiteWise Queries into cache Id', () => {
     const actualId = parseSiteWiseQueriesCacheId([createSiteWiseQuery(1), createSiteWiseQuery(2)]);
     const expectedId = JSON.stringify([
@@ -89,67 +89,6 @@ describe('parseSiteWiseQueriesCacheId', () => {
 });
 
 describe('TimeSeriesCache', () => {
-  describe('isCacheRequestOverlapping()', () => {
-    it('returns true when request and cache both starting at the same time.', () => {
-      const range = {
-        from: dateTime('2024-05-28T20:59:49.659Z'),
-        to: dateTime('2024-05-28T21:29:49.659Z'),
-        raw: { from: 'now-1h', to: 'now' },
-      };
-      const actual = TimeSeriesCache.isCacheRequestOverlapping(range, range);
-
-      expect(actual).toBe(true);
-    });
-
-    it('returns true when cache is before request and overlaps the request start time', () => {
-      const cacheRange = {
-        from: dateTime('2024-05-28T20:00:00Z'),
-        to: dateTime('2024-05-28T22:00:00Z'),
-        raw: { from: 'now-1h', to: 'now' },
-      };
-      const requestRange = {
-        from: dateTime('2024-05-28T21:00:00Z'),
-        to: dateTime('2024-05-28T25:00:00Z'),
-        raw: { from: 'now-1h', to: 'now' },
-      };
-      const actual = TimeSeriesCache.isCacheRequestOverlapping(cacheRange, requestRange);
-
-      expect(actual).toBe(true);
-    });
-
-    it('returns false when cache is before request but ends before the request start time', () => {
-      const cacheRange = {
-        from: dateTime('2024-05-28T20:00:00Z'),
-        to: dateTime('2024-05-28T21:00:00Z'),
-        raw: { from: 'now-1h', to: 'now' },
-      };
-      const requestRange = {
-        from: dateTime('2024-05-28T22:00:00Z'),
-        to: dateTime('2024-05-28T25:00:00Z'),
-        raw: { from: 'now-1h', to: 'now' },
-      };
-      const actual = TimeSeriesCache.isCacheRequestOverlapping(cacheRange, requestRange);
-
-      expect(actual).toBe(false);
-    });
-
-    it('returns false when cache is before request but ends at request start time', () => {
-      const cacheRange = {
-        from: dateTime('2024-05-28T20:00:00Z'),
-        to: dateTime('2024-05-28T22:00:00Z'),
-        raw: { from: 'now-1h', to: 'now' },
-      };
-      const requestRange = {
-        from: dateTime('2024-05-28T22:00:00Z'),
-        to: dateTime('2024-05-28T25:00:00Z'),
-        raw: { from: 'now-1h', to: 'now' },
-      };
-      const actual = TimeSeriesCache.isCacheRequestOverlapping(cacheRange, requestRange);
-
-      expect(actual).toBe(false);
-    });
-  });
-
   describe('trimTimeSeriesDataFrames()', () => {
     const absolutionRange = {
       from: dateTime('2024-05-28T00:00:00Z').valueOf(),
@@ -502,6 +441,169 @@ describe('TimeSeriesCache', () => {
 
       expect(dataFrames).toHaveLength(1);
       expect(dataFrames).toContainEqual(expectedDataFrame);
+    });
+  });
+
+  describe('getPaginatingRequest()', () => {
+    it('returns request with time series queries', () => {
+      const request = {
+        requestId: 'mock-request-id',
+        interval: '5s',
+        intervalMs: 5000,
+        range: {
+          from: dateTime('2024-05-28T00:00:00Z'),
+          to: dateTime('2024-05-28T01:00:00Z'),
+          raw: {
+            from: 'now-15m',
+            to: 'now'
+          ,}
+        },
+        scopedVars: {},
+        targets: [
+          {
+            refId: 'A',
+            queryType: QueryType.PropertyAggregate,
+          },
+          {
+            refId: 'B',
+            queryType: QueryType.PropertyInterpolated,
+          },
+          {
+            refId: 'C',
+            queryType: QueryType.PropertyValue,
+          },
+          {
+            refId: 'D',
+            queryType: QueryType.PropertyValueHistory,
+          },
+          {
+            refId: 'E',
+            queryType: QueryType.ListAssetModels,
+          }
+        ],
+        timezone: 'browser',
+        app: 'dashboard',
+        startTime: 1716858000000,
+      };
+    
+      const cacheRange = {
+        from: dateTime('2024-05-28T00:45:00Z'),
+        to: dateTime('2024-05-28T01:00:00Z'),
+        raw: {
+          from: 'now-15m',
+          to: 'now'
+        ,}
+      }
+
+      const expectedRequest = {
+        requestId: 'mock-request-id',
+        interval: '5s',
+        intervalMs: 5000,
+        range: {
+          from: dateTime('2024-05-28T00:45:00Z'),
+          to: dateTime('2024-05-28T01:00:00Z'),
+          raw: {
+            from: 'now-15m',
+            to: 'now'
+          ,}
+        },
+        scopedVars: {},
+        targets: [
+          {
+            refId: 'A',
+            queryType: QueryType.PropertyAggregate,
+          },
+          {
+            refId: 'B',
+            queryType: QueryType.PropertyInterpolated,
+          },
+          {
+            refId: 'C',
+            queryType: QueryType.PropertyValue,
+          },
+          {
+            refId: 'D',
+            queryType: QueryType.PropertyValueHistory,
+          },
+        ],
+        timezone: 'browser',
+        app: 'dashboard',
+        startTime: 1716858000000,
+      };
+
+      expect(TimeSeriesCache.getPaginatingRequest(request, cacheRange)).toEqual(expectedRequest);
+    });
+
+    it('returns request with no time series queries', () => {
+      const request = {
+        requestId: 'mock-request-id',
+        interval: '5s',
+        intervalMs: 5000,
+        range: {
+          from: dateTime('2024-05-28T00:00:00Z'),
+          to: dateTime('2024-05-28T01:00:00Z'),
+          raw: {
+            from: 'now-15m',
+            to: 'now'
+          ,}
+        },
+        scopedVars: {},
+        targets: [
+          {
+            refId: 'A',
+            queryType: QueryType.ListAssetModels,
+          },
+          {
+            refId: 'B',
+            queryType: QueryType.ListAssets,
+          },
+          {
+            refId: 'C',
+            queryType: QueryType.ListAssociatedAssets,
+          },
+          {
+            refId: 'D',
+            queryType: QueryType.ListAssetProperties,
+          },
+          {
+            refId: 'E',
+            queryType: QueryType.DescribeAsset,
+          }
+        ],
+        timezone: 'browser',
+        app: 'dashboard',
+        startTime: 1716858000000,
+      };
+    
+      const range = {
+        from: dateTime('2024-05-28T00:45:00Z'),
+        to: dateTime('2024-05-28T01:00:00Z'),
+        raw: {
+          from: 'now-15m',
+          to: 'now'
+        ,}
+      }
+
+      const expectedRequest = {
+        requestId: 'mock-request-id',
+        interval: '5s',
+        intervalMs: 5000,
+        range: {
+          from: dateTime('2024-05-28T00:45:00Z'),
+          to: dateTime('2024-05-28T01:00:00Z'),
+          raw: {
+            from: 'now-15m',
+            to: 'now'
+          ,}
+        },
+        scopedVars: {},
+        targets: [],
+        timezone: 'browser',
+        app: 'dashboard',
+        startTime: 1716858000000,
+      };
+
+      expect(TimeSeriesCache.getPaginatingRequest(request, range)).toEqual(expectedRequest);
     });
   });
 

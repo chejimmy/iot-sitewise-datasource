@@ -1,4 +1,4 @@
-import { AbsoluteTimeRange, DataFrame } from "@grafana/data";
+import { AbsoluteTimeRange, ArrayVector, DataFrame, FieldType } from "@grafana/data";
 
 interface trimParams {
   dataFrame: DataFrame;
@@ -6,6 +6,14 @@ interface trimParams {
   lastObservation?: boolean;
 };
 
+/**
+ * Trim the time series data frame to the specified time range.
+ * @param param0 - The parameters for trimming the data frame.
+ * @param param0.dataFrame - The data frame to trim.
+ * @param param0.timeRange - The time range to trim to.
+ * @param param0.lastObservation - Whether to include the last observation in the range.
+ * @returns The trimmed data frame.
+ */
 export function trimTimeSeriesDataFrame({
   dataFrame,
   timeRange: { from, to },
@@ -20,7 +28,11 @@ export function trimTimeSeriesDataFrame({
     }
   }
 
-  const timeField = fields.find(field => field.name === 'time')!;
+  const timeField = fields.find(field => field.name === 'time' && field.type === FieldType.time);
+  if (timeField == null) {
+    // return the original data frame if a time field cannot be found
+    return dataFrame;
+  }
 
   let timeValues = timeField.values.toArray();
 
@@ -41,10 +53,9 @@ export function trimTimeSeriesDataFrame({
 
   const trimmedFields = fields.map(field => ({
     ...field,
-    values: field.values.toArray().slice(fromIndex, toIndex),
+    values: new ArrayVector(field.values.toArray().slice(fromIndex, toIndex)),
   }));
   
-  // TODO: be careful about Expand Time Range
   return {
     ...dataFrame,
     fields: trimmedFields,
@@ -52,7 +63,15 @@ export function trimTimeSeriesDataFrame({
   };
 }
 
-export function trimTimeSeriesDataFrameReversed({
+/**
+ * Trim the time series data frame to the specified time range where the time field is in reversed order.
+ * @param param0 - The parameters for trimming the data frame.
+ * @param param0.dataFrame - The data frame to trim.
+ * @param param0.timeRange - The time range to trim to.
+ * @param param0.lastObservation - Whether to include the last observation in the range.
+ * @returns The trimmed data frame.
+ */
+export function trimTimeSeriesDataFrameReversedTime({
   dataFrame,
   timeRange: { from, to },
   lastObservation,
@@ -66,7 +85,11 @@ export function trimTimeSeriesDataFrameReversed({
     }
   }
 
-  const timeField = fields.find(field => field.name === 'time')!;
+  const timeField = fields.find(field => field.name === 'time' && field.type === FieldType.time);
+  if (timeField == null) {
+    // return the original data frame if a time field cannot be found
+    return dataFrame;
+  }
 
   // Copy before reverse in place
   let timeValues = [...timeField.values.toArray()].reverse();
@@ -91,11 +114,10 @@ export function trimTimeSeriesDataFrameReversed({
 
     return {
       ...field,
-      values: dataValues.reverse(),
+      values: new ArrayVector(dataValues.reverse()),
     };
   });
   
-  // TODO: be careful about Expand Time Range
   return {
     ...dataFrame,
     fields: trimmedFields,
